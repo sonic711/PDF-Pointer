@@ -289,6 +289,14 @@
       };
     };
 
+    const getCanvasAtClientPoint = (clientX, clientY) => {
+      const element = document.elementFromPoint(clientX, clientY);
+      if (!element) {
+        return null;
+      }
+      return element.closest('canvas');
+    };
+
     const getPdfPointFromClient = (clientX, clientY, canvas) => {
       const rect = canvas.getBoundingClientRect();
       const cssX = clientX - rect.left;
@@ -429,16 +437,16 @@
     });
 
     viewer.addEventListener('pointerdown', (event) => {
-      const canvas = event.target.closest('canvas');
-      if (!canvas || !viewer.contains(canvas)) {
+      const pointer = getPointerInfo(event);
+      if (!pointer.isInside) {
         if (event.button === 2) {
           event.preventDefault();
         }
         return;
       }
 
-      const pointer = getPointerInfo(event);
-      if (!pointer.isInside) {
+      const canvas = getCanvasAtClientPoint(pointer.clientX, pointer.clientY);
+      if (!canvas || !viewer.contains(canvas)) {
         if (event.button === 2) {
           event.preventDefault();
         }
