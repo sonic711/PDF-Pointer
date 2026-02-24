@@ -189,9 +189,9 @@
 
     let measurementStart = null;
     let measurementLocked = false;
-    let isAltPressed = false;
-    let altLockOrigin = null;
-    let altLockAxis = null;
+    let isShiftPressed = false;
+    let shiftLockOrigin = null;
+    let shiftLockAxis = null;
     let lastPointerPosition = null;
 
     const hideCrosshair = () => {
@@ -212,43 +212,43 @@
       measurementLine.style.width = '';
     };
 
-    const clearAltLock = () => {
-      altLockOrigin = null;
-      altLockAxis = null;
+    const clearShiftLock = () => {
+      shiftLockOrigin = null;
+      shiftLockAxis = null;
     };
 
-    // When Alt is held we only allow movement along one axis from the lock origin.
-    const applyAltConstraint = (point) => {
-      if (!isAltPressed) {
+    // When Shift is held we only allow movement along one axis from the lock origin.
+    const applyShiftConstraint = (point) => {
+      if (!isShiftPressed) {
         return point;
       }
 
-      if (!altLockOrigin) {
-        altLockOrigin = { ...point };
+      if (!shiftLockOrigin) {
+        shiftLockOrigin = { ...point };
         return point;
       }
 
-      const dx = point.x - altLockOrigin.x;
-      const dy = point.y - altLockOrigin.y;
+      const dx = point.x - shiftLockOrigin.x;
+      const dy = point.y - shiftLockOrigin.y;
 
-      if (!altLockAxis) {
+      if (!shiftLockAxis) {
         const absDx = Math.abs(dx);
         const absDy = Math.abs(dy);
         if (absDx > absDy) {
-          altLockAxis = 'horizontal';
+          shiftLockAxis = 'horizontal';
         } else if (absDy > absDx) {
-          altLockAxis = 'vertical';
+          shiftLockAxis = 'vertical';
         } else {
-          return { ...altLockOrigin };
+          return { ...shiftLockOrigin };
         }
       }
 
-      if (altLockAxis === 'horizontal') {
-        return { x: point.x, y: altLockOrigin.y };
+      if (shiftLockAxis === 'horizontal') {
+        return { x: point.x, y: shiftLockOrigin.y };
       }
 
-      if (altLockAxis === 'vertical') {
-        return { x: altLockOrigin.x, y: point.y };
+      if (shiftLockAxis === 'vertical') {
+        return { x: shiftLockOrigin.x, y: point.y };
       }
 
       return point;
@@ -272,7 +272,7 @@
       let viewerY = rawViewerY;
 
       if (isInside) {
-        const constrained = applyAltConstraint({ x: rawViewerX, y: rawViewerY });
+        const constrained = applyShiftConstraint({ x: rawViewerX, y: rawViewerY });
         viewerX = constrained.x;
         viewerY = constrained.y;
       }
@@ -427,8 +427,8 @@
     viewer.addEventListener('pointerleave', () => {
       hideCrosshair();
       lastPointerPosition = null;
-      if (isAltPressed) {
-        clearAltLock();
+      if (isShiftPressed) {
+        clearShiftLock();
       }
     });
 
@@ -477,17 +477,17 @@
         return;
       }
 
-      if (event.key === 'Alt' && !isAltPressed) {
-        isAltPressed = true;
-        altLockAxis = null;
-        altLockOrigin = lastPointerPosition ? { ...lastPointerPosition } : null;
+      if (event.key === 'Shift' && !isShiftPressed) {
+        isShiftPressed = true;
+        shiftLockAxis = null;
+        shiftLockOrigin = lastPointerPosition ? { ...lastPointerPosition } : null;
       }
     });
 
     window.addEventListener('keyup', (event) => {
-      if (event.key === 'Alt' && isAltPressed) {
-        isAltPressed = false;
-        clearAltLock();
+      if (event.key === 'Shift' && isShiftPressed) {
+        isShiftPressed = false;
+        clearShiftLock();
       }
     });
   </script>
