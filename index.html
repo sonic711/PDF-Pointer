@@ -113,6 +113,22 @@
       transform: translateX(-9999px);
     }
 
+    .measurement-line {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 2px;
+      background: rgba(226, 47, 15, 0.9);
+      pointer-events: none;
+      opacity: 0;
+      transform-origin: 0 50%;
+      z-index: 11;
+    }
+
+    .measurement-line.visible {
+      opacity: 1;
+    }
+
     @media (prefers-color-scheme: dark) {
       body {
         background: #0f172a;
@@ -135,6 +151,10 @@
       .crosshair-line {
         background: rgba(148, 197, 255, 0.85);
       }
+
+      .measurement-line {
+        background: rgba(248, 113, 113, 0.9);
+      }
     }
   </style>
 </head>
@@ -152,6 +172,7 @@
         <div id="crosshairHorizontal" class="crosshair-line horizontal"></div>
         <div id="crosshairVertical" class="crosshair-line vertical"></div>
       </div>
+      <div id="measurementLine" class="measurement-line" aria-hidden="true"></div>
     </div>
   </main>
 
@@ -164,6 +185,10 @@
     const crosshair = document.getElementById('crosshair');
     const crosshairHorizontal = document.getElementById('crosshairHorizontal');
     const crosshairVertical = document.getElementById('crosshairVertical');
+    const measurementLine = document.getElementById('measurementLine');
+
+    let measurementStart = null;
+    let measurementLocked = false;
 
     const hideCrosshair = () => {
       crosshair.classList.remove('visible');
@@ -173,6 +198,95 @@
       crosshairHorizontal.style.transform = `translateY(${y}px)`;
       crosshairVertical.style.transform = `translateX(${x}px)`;
       crosshair.classList.add('visible');
+    };
+
+    const resetMeasurement = () => {
+      measurementStart = null;
+      measurementLocked = false;
+      measurementLine.classList.remove('visible');
+      measurementLine.style.transform = '';
+      measurementLine.style.width = '';
+    };
+
+    const getViewerPoint = (event) => {
+      const rect = viewer.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+    };
+
+    const getPdfPoint = (event, canvas) => {
+      const rect = canvas.getBoundingClientRect();
+      const cssX = event.clientX - rect.left;
+      const cssY = event.clientY - rect.top;
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const canvasX = cssX * scaleX;
+      const canvasY = cssY * scaleY;
+      const viewport = canvas._pdfViewport;
+      const [pdfX, pdfY] = viewport
+        ? viewport.convertToPdfPoint(canvasX, canvasY)
+        : [canvasX, canvas.height - canvasY];
+      return { pdfX, pdfY };
+    };
+
+    const drawMeasurementLine = (startPoint, endPoint) => {
+      const dx = endPoint.viewerX - startPoint.viewerX;
+      const dy = endPoint.viewerY - startPoint.viewerY;
+      const length = Math.hypot(dx, dy);
+      const angle = Math.atan2(dy, dx);
+      measurementLine.style.width = `${length}px`;
+      measurementLine.style.transform = `translate(${startPoint.viewerX}px, ${startPoint.viewerY}px) rotate(${angle}rad)`;
+      measurementLine.classList.add('visible');
+    };
+
+    const startMeasurement = (point) => {
+      measurementStart = point;
+      measurementLocked = false;
+      measurementLine.classList.remove('visible');
+      measurementLine.style.transform = '';
+      measurementLine.style.width = '';
+      coordsEl.textContent = `起點 頁 ${point.page} | X: ${point.pdfX.toFixed(1)}, Y: ${point.pdfY.toFixed(1)}`;
+    };
+
+    const completeMeasurement = (endPoint) => {
+      if (!measurementStart) {
+        return;
+      }
+
+      drawMeasurementLine(measurementStart, endPoint);
+      const deltaX = endPoint.pdfX - measurementStart.pdfX;
+      const deltaY = endPoint.pdfY - measurementStart.pdfY;
+      coordsEl.textContent = `ΔX: ${deltaX.toFixed(1)}, ΔY: ${deltaY.toFixed(1)} (頁 ${measurementStart.page} → ${endPoint.page}) | 按 ESC 取消紅線`;
+      measurementStart = null;
+      measurementLocked = true;
+    };
+
+    const handleLeftClick = (event, canvas) => {
+      const { pdfX, pdfY } = getPdfPoint(event, canvas);
+      const page = canvas.dataset.page || '?';
+      const message = `頁碼 ${page} | X: ${pdfX.toFixed(1)}, Y: ${pdfY.toFixed(1)}`;
+      coordsEl.textContent = message;
+      alert(message);
+    };
+
+    const handleRightClick = (event, canvas) => {
+      if (measurementLocked) {
+        return;
+      }
+
+      const { pdfX, pdfY } = getPdfPoint(event, canvas);
+      const { x, y } = getViewerPoint(event);
+      const page = canvas.dataset.page || '?';
+      const point = { pdfX, pdfY, viewerX: x, viewerY: y, page };
+
+      if (!measurementStart) {
+        startMeasurement(point);
+        return;
+      }
+
+      completeMeasurement(point);
     };
 
     if (window.pdfjsLib) {
@@ -187,6 +301,9 @@
 
       viewer.innerHTML = '';
       viewer.appendChild(crosshair);
+      viewer.appendChild(measurementLine);
+      hideCrosshair();
+      resetMeasurement();
       coordsEl.textContent = 'X: -, Y: -';
       statusEl.textContent = 'PDF 讀取中，請稍候…';
 
@@ -237,31 +354,32 @@
 
     viewer.addEventListener('pointerleave', hideCrosshair);
 
-    viewer.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) {
-        return;
-      }
+    viewer.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+    });
 
+    viewer.addEventListener('pointerdown', (event) => {
       const canvas = event.target.closest('canvas');
       if (!canvas || !viewer.contains(canvas)) {
+        if (event.button === 2) {
+          event.preventDefault();
+        }
         return;
       }
 
-      const rect = canvas.getBoundingClientRect();
-      const cssX = event.clientX - rect.left;
-      const cssY = event.clientY - rect.top;
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      const canvasX = cssX * scaleX;
-      const canvasY = cssY * scaleY;
-      const viewport = canvas._pdfViewport;
-      const [pdfX, pdfY] = viewport
-        ? viewport.convertToPdfPoint(canvasX, canvasY)
-        : [canvasX, canvas.height - canvasY];
-      const page = canvas.dataset.page || '?';
-      const message = `頁碼 ${page} | X: ${pdfX.toFixed(1)}, Y: ${pdfY.toFixed(1)}`;
-      coordsEl.textContent = message;
-      alert(message);
+      if (event.button === 0) {
+        handleLeftClick(event, canvas);
+      } else if (event.button === 2) {
+        event.preventDefault();
+        handleRightClick(event, canvas);
+      }
+    });
+
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        resetMeasurement();
+        coordsEl.textContent = 'X: -, Y: -';
+      }
     });
   </script>
 </body>
