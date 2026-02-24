@@ -40,3 +40,10 @@
    - 第一次右鍵：記錄起點並在座標框顯示 `起點...`。
    - 第二次右鍵：在終點畫出臨時紅線並顯示 `ΔX/ΔY` 差值。
    - 按下 `Esc` 可取消紅線並重新開始量測。
+
+## 座標計算原理
+
+1. 透過 `pointerdown` 事件取得滑鼠位置 `event.clientX/Y`，再配合該頁 canvas 的 `getBoundingClientRect()`，換算為相對於 canvas 的 CSS 座標。
+2. 因 PDF 會依容器寬度縮放，canvas 實際像素 (`canvas.width/height`) 與 CSS 尺寸不同，因此需用縮放比 `canvas.width / rect.width`、`canvas.height / rect.height` 還原成渲染時的像素座標。
+3. pdf.js 在渲染時會回傳 `viewport`，包含從 canvas 像素轉換至 PDF 內部座標系的函式 `viewport.convertToPdfPoint`。將上述像素座標帶入後，即可得到 PDF 原生的 X/Y（以左下角為 (0,0)）。
+4. 右鍵量測亦沿用同一轉換流程，分別記錄起點與終點的 PDF 座標，再相減計算 `ΔX/ΔY`，並以兩點在 viewer 容器內的座標繪製暫時紅線。
