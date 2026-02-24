@@ -189,6 +189,10 @@
 
     let measurementStart = null;
     let measurementLocked = false;
+    let isAltPressed = false;
+    let altLockOrigin = null;
+    let altLockAxis = null;
+    let lastPointerPosition = null;
 
     const hideCrosshair = () => {
       crosshair.classList.remove('visible');
@@ -208,18 +212,87 @@
       measurementLine.style.width = '';
     };
 
-    const getViewerPoint = (event) => {
+    const clearAltLock = () => {
+      altLockOrigin = null;
+      altLockAxis = null;
+    };
+
+    // When Alt is held we only allow movement along one axis from the lock origin.
+    const applyAltConstraint = (point) => {
+      if (!isAltPressed) {
+        return point;
+      }
+
+      if (!altLockOrigin) {
+        altLockOrigin = { ...point };
+        return point;
+      }
+
+      const dx = point.x - altLockOrigin.x;
+      const dy = point.y - altLockOrigin.y;
+
+      if (!altLockAxis) {
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        if (absDx > absDy) {
+          altLockAxis = 'horizontal';
+        } else if (absDy > absDx) {
+          altLockAxis = 'vertical';
+        } else {
+          return { ...altLockOrigin };
+        }
+      }
+
+      if (altLockAxis === 'horizontal') {
+        return { x: point.x, y: altLockOrigin.y };
+      }
+
+      if (altLockAxis === 'vertical') {
+        return { x: altLockOrigin.x, y: point.y };
+      }
+
+      return point;
+    };
+
+    const getPointerInfo = (event) => {
       const rect = viewer.getBoundingClientRect();
+      const rawViewerX = event.clientX - rect.left;
+      const rawViewerY = event.clientY - rect.top;
+      const isInside =
+        rawViewerX >= 0 &&
+        rawViewerY >= 0 &&
+        rawViewerX <= rect.width &&
+        rawViewerY <= rect.height;
+
+      if (isInside) {
+        lastPointerPosition = { x: rawViewerX, y: rawViewerY };
+      }
+
+      let viewerX = rawViewerX;
+      let viewerY = rawViewerY;
+
+      if (isInside) {
+        const constrained = applyAltConstraint({ x: rawViewerX, y: rawViewerY });
+        viewerX = constrained.x;
+        viewerY = constrained.y;
+      }
+
       return {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
+        viewerX,
+        viewerY,
+        clientX: viewerX + rect.left,
+        clientY: viewerY + rect.top,
+        rawViewerX,
+        rawViewerY,
+        rect,
+        isInside,
       };
     };
 
-    const getPdfPoint = (event, canvas) => {
+    const getPdfPointFromClient = (clientX, clientY, canvas) => {
       const rect = canvas.getBoundingClientRect();
-      const cssX = event.clientX - rect.left;
-      const cssY = event.clientY - rect.top;
+      const cssX = clientX - rect.left;
+      const cssY = clientY - rect.top;
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
       const canvasX = cssX * scaleX;
@@ -263,23 +336,17 @@
       measurementLocked = true;
     };
 
-    const handleLeftClick = (event, canvas) => {
-      const { pdfX, pdfY } = getPdfPoint(event, canvas);
+    const handleLeftClick = (canvas, pdfPoint) => {
       const page = canvas.dataset.page || '?';
-      const message = `頁碼 ${page} | X: ${pdfX.toFixed(1)}, Y: ${pdfY.toFixed(1)}`;
+      const message = `頁碼 ${page} | X: ${pdfPoint.pdfX.toFixed(1)}, Y: ${pdfPoint.pdfY.toFixed(1)}`;
       coordsEl.textContent = message;
       alert(message);
     };
 
-    const handleRightClick = (event, canvas) => {
+    const handleRightClick = (point) => {
       if (measurementLocked) {
         return;
       }
-
-      const { pdfX, pdfY } = getPdfPoint(event, canvas);
-      const { x, y } = getViewerPoint(event);
-      const page = canvas.dataset.page || '?';
-      const point = { pdfX, pdfY, viewerX: x, viewerY: y, page };
 
       if (!measurementStart) {
         startMeasurement(point);
@@ -340,19 +407,22 @@
     });
 
     viewer.addEventListener('pointermove', (event) => {
-      const rect = viewer.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-
-      if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
+      const pointer = getPointerInfo(event);
+      if (!pointer.isInside) {
         hideCrosshair();
         return;
       }
 
-      showCrosshairAt(x, y);
+      showCrosshairAt(pointer.viewerX, pointer.viewerY);
     });
 
-    viewer.addEventListener('pointerleave', hideCrosshair);
+    viewer.addEventListener('pointerleave', () => {
+      hideCrosshair();
+      lastPointerPosition = null;
+      if (isAltPressed) {
+        clearAltLock();
+      }
+    });
 
     viewer.addEventListener('contextmenu', (event) => {
       event.preventDefault();
@@ -367,11 +437,28 @@
         return;
       }
 
+      const pointer = getPointerInfo(event);
+      if (!pointer.isInside) {
+        if (event.button === 2) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      const pdfPoint = getPdfPointFromClient(pointer.clientX, pointer.clientY, canvas);
+
       if (event.button === 0) {
-        handleLeftClick(event, canvas);
+        handleLeftClick(canvas, pdfPoint);
       } else if (event.button === 2) {
         event.preventDefault();
-        handleRightClick(event, canvas);
+        const page = canvas.dataset.page || '?';
+        handleRightClick({
+          pdfX: pdfPoint.pdfX,
+          pdfY: pdfPoint.pdfY,
+          viewerX: pointer.viewerX,
+          viewerY: pointer.viewerY,
+          page,
+        });
       }
     });
 
@@ -379,6 +466,20 @@
       if (event.key === 'Escape') {
         resetMeasurement();
         coordsEl.textContent = 'X: -, Y: -';
+        return;
+      }
+
+      if (event.key === 'Alt' && !isAltPressed) {
+        isAltPressed = true;
+        altLockAxis = null;
+        altLockOrigin = lastPointerPosition ? { ...lastPointerPosition } : null;
+      }
+    });
+
+    window.addEventListener('keyup', (event) => {
+      if (event.key === 'Alt' && isAltPressed) {
+        isAltPressed = false;
+        clearAltLock();
       }
     });
   </script>
